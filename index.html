@@ -280,7 +280,8 @@ function addCoord(lat, lng) {
     map.setView([lat, lng], 18);
   }
   document.getElementById('pts-display').textContent = coords.length;
-  document.getElementById('dist-display').textContent = Math.round(calcDistance());
+  const d = calcDistance();
+  document.getElementById('dist-display').textContent = d > 0 ? Math.round(d) : Math.round(stepCount * 0.6);
   log('座標 #' + coords.length + '：' + lat.toFixed(5) + ', ' + lng.toFixed(5));
 }
 
@@ -302,7 +303,8 @@ function simulateStep() {
       map.panTo([simLat, simLng]);
       stepCount += Math.floor(Math.random() * 3) + 2;
       document.getElementById('step-display').textContent = stepCount;
-      document.getElementById('dist-display').textContent = Math.round(calcDistance());
+      const d = calcDistance();
+      document.getElementById('dist-display').textContent = d > 0 ? Math.round(d) : Math.round(stepCount * 0.6);
     }, 1200);
   } else {
     stopSimulate();
