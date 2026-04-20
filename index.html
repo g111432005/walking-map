@@ -369,14 +369,15 @@ function onBTData(event) {
     if (!isNaN(n)) {
       stepCount = n;
       document.getElementById('step-display').textContent = n;
-      document.getElementById('dist-display').textContent = Math.max(Math.round(calcDistance()), Math.round(n * 0.6));
+      const gpsDist = calcDistance();
+      document.getElementById('dist-display').textContent = gpsDist > 0 ? Math.round(gpsDist) : Math.round(n * 0.6);
       log('步數更新：' + n + ' 步', 'ok');
     }
   }
 }
 
 function calcDistance() {
-  if (coords.length < 2) return stepCount * 0.6;
+  if (coords.length < 2) return 0;
   let total = 0;
   for (let i = 1; i < coords.length; i++) total += haversine(coords[i-1], coords[i]);
   return total;
@@ -389,7 +390,8 @@ function haversine([la1,lo1],[la2,lo2]) {
 }
 
 function showModal() {
-  const dist = Math.max(Math.round(calcDistance()), Math.round(stepCount * 0.6));
+  const gpsDist = calcDistance();
+  const dist = gpsDist > 0 ? Math.round(gpsDist) : Math.round(stepCount * 0.6);
   const mins = startTime ? Math.round((Date.now()-startTime)/60000) : 0;
   document.getElementById('m-steps').textContent = stepCount;
   document.getElementById('m-dist').textContent  = dist;
