@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>走路地圖</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --green: #2ecc71;
+    --green-dark: #27ae60;
+    --blue: #3498db;
+    --orange: #f39c12;
+    --red: #e74c3c;
+    --bg: #f0f4f8;
+    --card: #ffffff;
+    --text: #2c3e50;
+    --text-muted: #7f8c8d;
+    --radius: 16px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+    font-family: 'Nunito', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .header {
+    background: linear-gradient(135deg, #2ecc71, #27ae60);
+    padding: 16px 16px 20px;
+    text-align: center;
+  }
+  .header h1 { font-size: 20px; font-weight: 900; color: #fff; letter-spacing: 1px; }
+  .header p  { font-size: 12px; color: rgba(255,255,255,0.85); margin-top: 3px; }
+
+  .status-bar {
+    display: flex; gap: 8px; padding: 10px 12px;
+    background: var(--card); border-bottom: 1px solid #e8ecef; flex-wrap: wrap;
+  }
+  .status-pill {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 700; padding: 4px 10px;
+    border-radius: 20px; background: #f0f4f8; color: var(--text-muted);
+  }
+  .status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #bdc3c7; flex-shrink: 0; }
+  .status-pill.active { background: #eafaf1; color: #27ae60; }
+  .status-pill.active .dot { background: #2ecc71; animation: pulse 1.5s infinite; }
+  .status-pill.bt-on { background: #eaf4fb; color: #2980b9; }
+  .status-pill.bt-on .dot { background: #3498db; }
+  .status-pill.sim-on { background: #fef9e7; color: #d68910; }
+  .status-pill.sim-on .dot { background: #f39c12; animation: pulse 1s infinite; }
+
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50%      { opacity:0.4; transform:scale(0.7); }
+  }
+
+  #map { width: 100%; height: 280px; }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px; }
+  .stat-card {
+    background: var(--card); border-radius: var(--radius);
+    padding: 14px 12px; text-align: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  }
+  .stat-card .label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+  .stat-card .value { font-size: 32px; font-weight: 900; line-height: 1; color: var(--green-dark); }
+  .stat-card .unit  { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-top: 2px; }
+
+  .btn-group { display: flex; flex-direction: column; gap: 9px; padding: 0 12px 12px; }
+  .btn-row   { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+
+  .btn {
+    width: 100%; padding: 14px 10px; border: none; border-radius: var(--radius);
+    font-family: 'Nunito', sans-serif; font-size: 14px; font-weight: 800;
+    cursor: pointer; transition: all 0.12s; letter-spacing: 0.2px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    -webkit-user-select: none; user-select: none;
+  }
+  .btn:active  { transform: scale(0.96); }
+  .btn:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
+
+  .btn-start { background: linear-gradient(135deg,#2ecc71,#27ae60); color:#fff; box-shadow:0 4px 12px rgba(46,204,113,.35); }
+  .btn-stop  { background: linear-gradient(135deg,#e74c3c,#c0392b); color:#fff; box-shadow:0 4px 12px rgba(231,76,60,.35); }
+  .btn-bt    { background: linear-gradient(135deg,#3498db,#2980b9); color:#fff; box-shadow:0 4px 12px rgba(52,152,219,.35); }
+  .btn-sim   { background: linear-gradient(135deg,#f39c12,#d68910); color:#fff; box-shadow:0 4px 12px rgba(243,156,18,.35); }
+  .btn-reset { background: var(--card); color: var(--text-muted); border: 1.5px solid #dde1e7; }
+
+  .log-section { padding: 0 12px 20px; }
+  .log-title { font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  #log {
+    background: var(--card); border-radius: 12px; padding: 10px 12px;
+    font-size: 11px; color: var(--text-muted);
+    min-height: 52px; max-height: 100px; overflow-y: auto; line-height: 1.8;
+  }
+  .log-item { border-bottom: 1px solid #f0f4f8; padding: 1px 0; }
+  .log-item:last-child { border: none; }
+  .log-ok   { color: #27ae60; }
+  .log-err  { color: #e74c3c; }
+  .log-info { color: #3498db; }
+  .log-sim  { color: #d68910; }
+
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.55); z-index: 1000;
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--card); border-radius: 24px; padding: 28px 20px;
+    width: 100%; max-width: 340px; text-align: center;
+    animation: pop 0.3s cubic-bezier(0.34,1.56,0.64,1);
+  }
+  @keyframes pop { from{transform:scale(.8);opacity:0} to{transform:scale(1);opacity:1} }
+  .modal .trophy { font-size: 52px; margin-bottom: 10px; }
+  .modal h2 { font-size: 20px; font-weight: 900; margin-bottom: 16px; }
+  .modal-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .modal-stat { background: var(--bg); border-radius: 14px; padding: 12px 8px; }
+  .modal-stat .v { font-size: 28px; font-weight: 900; color: var(--green-dark); }
+  .modal-stat .l { font-size: 11px; font-weight: 700; color: var(--text-muted); margin-top: 2px; }
+  .modal-sim-note { font-size: 11px; color: #d68910; background: #fef9e7; border-radius: 8px; padding: 6px 10px; margin-bottom: 14px; }
+  .modal-close {
+    width: 100%; padding: 13px; border-radius: 14px;
+    background: linear-gradient(135deg,#2ecc71,#27ae60);
+    color: #fff; font-family: 'Nunito',sans-serif;
+    font-size: 14px; font-weight: 800; border: none; cursor: pointer;
+  }
+  .note { font-size: 10px; color: var(--text-muted); text-align: center; padding: 0 12px 16px; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>走路地圖 🗺️</h1>
+  <p>記錄你走過的路，看看你走了多遠！</p>
+</div>
+
+<div class="status-bar">
+  <div class="status-pill" id="gps-pill"><div class="dot"></div><span>GPS 待機</span></div>
+  <div class="status-pill" id="bt-pill"><div class="dot"></div><span>micro:bit 未連線</span></div>
+  <div class="status-pill" id="sim-pill" style="display:none"><div class="dot"></div><span>模擬模式</span></div>
+</div>
+
+<div id="map"></div>
+
+<div class="stats">
+  <div class="stat-card">
+    <div class="label">步數</div>
+    <div class="value" id="step-display">0</div>
+    <div class="unit">步</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">距離</div>
+    <div class="value" id="dist-display">0</div>
+    <div class="unit">公尺</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">座標點</div>
+    <div class="value" id="pts-display">0</div>
+    <div class="unit">個</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">狀態</div>
+    <div class="value" id="state-display" style="font-size:16px;padding-top:8px;">待機</div>
+    <div class="unit" id="state-sub">按開始走路</div>
+  </div>
+</div>
+
+<div class="btn-group">
+  <button class="btn btn-start" id="btn-start" onclick="startWalk()">開始走路</button>
+  <button class="btn btn-stop"  id="btn-stop"  onclick="stopWalk()" disabled>結束走路</button>
+  <div class="btn-row">
+    <button class="btn btn-bt"  id="btn-bt"  onclick="connectBluetooth()">連線 micro:bit</button>
+    <button class="btn btn-sim" id="btn-sim" onclick="simulateStep()" disabled>模擬走路</button>
+  </div>
+  <button class="btn btn-reset" onclick="resetAll()">重新開始</button>
+</div>
+
+<div class="log-section">
+  <div class="log-title">系統訊息</div>
+  <div id="log"><div class="log-item log-info">等待開始走路...</div></div>
+</div>
+
+<p class="note">連線 micro:bit 需使用 Chrome 或 Edge ・ 走路時請允許位置存取權限</p>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="trophy">🏆</div>
+    <h2>走路完成！</h2>
+    <div id="sim-note" class="modal-sim-note" style="display:none">模擬模式 — 座標為虛擬資料</div>
+    <div class="modal-stats">
+      <div class="modal-stat"><div class="v" id="m-steps">0</div><div class="l">步數</div></div>
+      <div class="modal-stat"><div class="v" id="m-dist">0</div><div class="l">公尺</div></div>
+      <div class="modal-stat"><div class="v" id="m-pts">0</div><div class="l">座標點</div></div>
+      <div class="modal-stat"><div class="v" id="m-time">0</div><div class="l">分鐘</div></div>
+    </div>
+    <button class="modal-close" onclick="closeModal()">查看地圖軌跡</button>
+  </div>
+</div>
+
+<script>
+let map, polyline, startMarker, endMarker;
+let coords = [];
+let gpsWatcher = null;
+let isWalking = false;
+let stepCount = 0;
+let startTime = null;
+let btDevice = null, btChar = null;
+let simInterval = null;
+let isSimMode = false;
+let simLat = 25.0330, simLng = 121.5335;
+
+map = L.map('map', { zoomControl: true, attributionControl: false });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+map.setView([simLat, simLng], 17);
+
+polyline = L.polyline([], {
+  color: '#2ecc71', weight: 5, opacity: 0.9, lineCap: 'round', lineJoin: 'round'
+}).addTo(map);
+
+function log(msg, type='info') {
+  const el = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className = 'log-item log-' + type;
+  const t = new Date().toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  div.textContent = '[' + t + '] ' + msg;
+  el.prepend(div);
+}
+
+function startWalk() {
+  coords = []; isWalking = true; startTime = Date.now();
+  polyline.setLatLngs([]);
+  if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+  if (endMarker)   { map.removeLayer(endMarker);   endMarker = null; }
+
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-stop').disabled  = false;
+  document.getElementById('btn-sim').disabled   = false;
+  document.getElementById('state-display').textContent = '走路中';
+  document.getElementById('state-sub').textContent = '記錄 GPS 中';
+
+  if (navigator.geolocation) {
+    const p = document.getElementById('gps-pill');
+    p.className = 'status-pill active';
+    p.innerHTML = '<div class="dot"></div><span>GPS 記錄中</span>';
+    gpsWatcher = navigator.geolocation.watchPosition(onGPS,
+      e => { log('GPS 錯誤：' + e.message, 'err'); log('提示：可按「模擬走路」測試', 'sim'); },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+    );
+    log('開始記錄 GPS', 'ok');
+  } else {
+    log('此裝置不支援 GPS，請使用模擬走路', 'err');
+  }
+}
+
+function onGPS(pos) {
+  if (!isWalking) return;
+  const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+  if (accuracy > 50) return;
+  addCoord(lat, lng);
+  map.panTo([lat, lng]);
+}
+
+function addCoord(lat, lng) {
+  coords.push([lat, lng]);
+  polyline.setLatLngs(coords);
+  if (coords.length === 1) {
+    startMarker = L.circleMarker([lat, lng], {
+      radius: 8, fillColor: '#2ecc71', color: '#fff', weight: 2, fillOpacity: 1
+    }).addTo(map).bindPopup('起點');
+    map.setView([lat, lng], 18);
+  }
+  document.getElementById('pts-display').textContent = coords.length;
+  document.getElementById('dist-display').textContent = Math.round(calcDistance());
+  log('座標 #' + coords.length + '：' + lat.toFixed(5) + ', ' + lng.toFixed(5));
+}
+
+function simulateStep() {
+  if (!isSimMode) {
+    isSimMode = true;
+    const p = document.getElementById('sim-pill');
+    p.style.display = 'flex';
+    p.className = 'status-pill sim-on';
+    p.innerHTML = '<div class="dot"></div><span>模擬中</span>';
+    document.getElementById('btn-sim').textContent = '停止模擬';
+    log('模擬走路開始', 'sim');
+
+    simInterval = setInterval(() => {
+      if (!isWalking) { stopSimulate(); return; }
+      simLat += (Math.random() - 0.3) * 0.00008;
+      simLng += (Math.random() + 0.1) * 0.00010;
+      addCoord(simLat, simLng);
+      map.panTo([simLat, simLng]);
+      stepCount += Math.floor(Math.random() * 3) + 2;
+      document.getElementById('step-display').textContent = stepCount;
+      document.getElementById('dist-display').textContent = Math.round(calcDistance());
+    }, 1200);
+  } else {
+    stopSimulate();
+  }
+}
+
+function stopSimulate() {
+  if (simInterval) { clearInterval(simInterval); simInterval = null; }
+  isSimMode = false;
+  const p = document.getElementById('sim-pill');
+  p.className = 'status-pill';
+  p.innerHTML = '<div class="dot"></div><span>模擬已停止</span>';
+  document.getElementById('btn-sim').textContent = '模擬走路';
+  log('模擬停止', 'sim');
+}
+
+function stopWalk() {
+  isWalking = false;
+  stopSimulate();
+  if (gpsWatcher !== null) { navigator.geolocation.clearWatch(gpsWatcher); gpsWatcher = null; }
+  document.getElementById('btn-stop').disabled = true;
+  document.getElementById('btn-sim').disabled  = true;
+  document.getElementById('state-display').textContent = '完成';
+  document.getElementById('state-sub').textContent = '可連線讀步數';
+  const p = document.getElementById('gps-pill');
+  p.className = 'status-pill';
+  p.innerHTML = '<div class="dot"></div><span>GPS 已停止</span>';
+  if (coords.length > 0) {
+    const last = coords[coords.length-1];
+    endMarker = L.circleMarker(last, {
+      radius: 8, fillColor: '#e74c3c', color: '#fff', weight: 2, fillOpacity: 1
+    }).addTo(map).bindPopup('終點');
+    map.fitBounds(polyline.getBounds(), { padding: [30,30] });
+  }
+  log('走路結束', 'ok');
+  showModal();
+}
+
+async function connectBluetooth() {
+  if (!navigator.bluetooth) { log('請使用 Chrome 或 Edge 瀏覽器', 'err'); return; }
+  try {
+    log('搜尋 micro:bit...', 'info');
+    btDevice = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e']
+    });
+    log('找到：' + btDevice.name, 'ok');
+    const server = await btDevice.gatt.connect();
+    const p = document.getElementById('bt-pill');
+    p.className = 'status-pill bt-on';
+    p.innerHTML = '<div class="dot"></div><span>' + btDevice.name + '</span>';
+    const svc = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
+    btChar = await svc.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
+    await btChar.startNotifications();
+    btChar.addEventListener('characteristicvaluechanged', onBTData);
+    log('開始接收步數資料', 'ok');
+  } catch(e) { log('藍牙失敗：' + e.message, 'err'); }
+}
+
+function onBTData(event) {
+  const value = new TextDecoder().decode(event.target.value).trim();
+  if (value.startsWith('STEPS:')) {
+    const n = parseInt(value.split(':')[1]);
+    if (!isNaN(n)) {
+      stepCount = n;
+      document.getElementById('step-display').textContent = n;
+      document.getElementById('dist-display').textContent = Math.max(Math.round(calcDistance()), Math.round(n * 0.6));
+      log('步數更新：' + n + ' 步', 'ok');
+    }
+  }
+}
+
+function calcDistance() {
+  if (coords.length < 2) return stepCount * 0.6;
+  let total = 0;
+  for (let i = 1; i < coords.length; i++) total += haversine(coords[i-1], coords[i]);
+  return total;
+}
+
+function haversine([la1,lo1],[la2,lo2]) {
+  const R = 6371000, dLa=(la2-la1)*Math.PI/180, dLo=(lo2-lo1)*Math.PI/180;
+  const a = Math.sin(dLa/2)**2 + Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dLo/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function showModal() {
+  const dist = Math.max(Math.round(calcDistance()), Math.round(stepCount * 0.6));
+  const mins = startTime ? Math.round((Date.now()-startTime)/60000) : 0;
+  document.getElementById('m-steps').textContent = stepCount;
+  document.getElementById('m-dist').textContent  = dist;
+  document.getElementById('m-pts').textContent   = coords.length;
+  document.getElementById('m-time').textContent  = mins;
+  document.getElementById('sim-note').style.display = (coords.length === 0 && stepCount === 0) ? 'none' : isSimMode ? 'block' : 'none';
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal() { document.getElementById('modal').classList.remove('show'); }
+
+function resetAll() {
+  coords = []; stepCount = 0; startTime = null; isWalking = false;
+  stopSimulate();
+  if (gpsWatcher !== null) { navigator.geolocation.clearWatch(gpsWatcher); gpsWatcher = null; }
+  if (btDevice && btDevice.gatt.connected) btDevice.gatt.disconnect();
+  polyline.setLatLngs([]);
+  if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+  if (endMarker)   { map.removeLayer(endMarker);   endMarker = null; }
+  simLat = 25.0330; simLng = 121.5335;
+  ['step-display','dist-display','pts-display'].forEach(id => document.getElementById(id).textContent = '0');
+  document.getElementById('state-display').textContent = '待機';
+  document.getElementById('state-sub').textContent = '按開始走路';
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-stop').disabled  = true;
+  document.getElementById('btn-sim').disabled   = true;
+  document.getElementById('btn-sim').textContent = '模擬走路';
+  document.getElementById('sim-pill').style.display = 'none';
+  document.getElementById('gps-pill').className = 'status-pill';
+  document.getElementById('gps-pill').innerHTML = '<div class="dot"></div><span>GPS 待機</span>';
+  document.getElementById('bt-pill').className  = 'status-pill';
+  document.getElementById('bt-pill').innerHTML  = '<div class="dot"></div><span>micro:bit 未連線</span>';
+  document.getElementById('log').innerHTML = '<div class="log-item log-info">已重設，等待開始走路...</div>';
+  map.setView([simLat, simLng], 17);
+}
+</script>
+</body>
+</html>
