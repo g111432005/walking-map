@@ -541,19 +541,30 @@ async function connectBluetooth() {
 
 async function doConnect(device) {
   try {
+    // 先確保舊連線完全斷開
+    if (device.gatt.connected) {
+      try { device.gatt.disconnect(); } catch(e) {}
+      await new Promise(r => setTimeout(r, 500));
+    }
     const server = await device.gatt.connect();
     const p = document.getElementById('bt-pill');
     p.className = 'status-pill bt-on';
     p.innerHTML = '<div class="dot"></div><span>' + device.name + '</span>';
+    // 重連時重新取得 service 和 characteristic
     const svc = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
     btChar = await svc.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
+    // 停止舊的 notification 再重新啟動
+    try { await btChar.stopNotifications(); } catch(e) {}
     await btChar.startNotifications();
     btChar.removeEventListener('characteristicvaluechanged', onBTData);
     btChar.addEventListener('characteristicvaluechanged', onBTData);
     btConnected = true;
     lastBTDataTime = Date.now();
     log('連線成功，開始接收步數', 'ok');
-  } catch(e) { log('連線失敗：' + e.message, 'err'); }
+  } catch(e) {
+    btConnected = false;
+    log('連線失敗：' + e.message, 'err');
+  }
 }
 
 function onDisconnected() {
@@ -567,13 +578,13 @@ function onDisconnected() {
 }
 
 // 用「最後收到資料的時間」偵測斷線（手機最可靠的方式）
-// micro:bit 每秒發一次，超過 4 秒沒收到就視為斷線
+// micro:bit 每秒發一次，超過 8 秒沒收到就視為斷線
 let lastBTDataTime = 0;
 let btConnected = false;
 setInterval(() => {
   if (!btConnected) return;
   const now = Date.now();
-  if (lastBTDataTime > 0 && now - lastBTDataTime > 4000) {
+  if (lastBTDataTime > 0 && now - lastBTDataTime > 8000) {
     btConnected = false;
     lastBTDataTime = 0;
     onDisconnected();
