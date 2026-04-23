@@ -522,8 +522,8 @@ function stopWalk() {
 async function connectBluetooth() {
   if (!navigator.bluetooth) { log('請使用 Chrome 或 Edge 瀏覽器', 'err'); return; }
   try {
-    // 如果已有裝置但斷線，直接重連不用重新搜尋
-    if (btDevice && !btDevice.gatt.connected) {
+    // 用 btConnected 旗標判斷，不依賴手機不可靠的 gatt.connected
+    if (btDevice && !btConnected) {
       log('重新連線中...', 'info');
       await doConnect(btDevice);
       return;
@@ -558,7 +558,9 @@ async function doConnect(device) {
 
 function onDisconnected() {
   const p = document.getElementById('bt-pill');
-  if (p.className !== 'status-pill bt-on') return; // 避免重複觸發
+  if (p.className !== 'status-pill bt-on') return;
+  btConnected = false;
+  lastBTDataTime = 0;
   p.className = 'status-pill';
   p.innerHTML = '<div class="dot"></div><span>已斷線，按此重連</span>';
   log('藍牙斷線！按「連線 micro:bit」重連', 'err');
