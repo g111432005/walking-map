@@ -546,11 +546,18 @@ async function doConnect(device) {
     p.innerHTML = '<div class="dot"></div><span>' + device.name + '</span>';
     const svc = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
     btChar = await svc.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
-    await btChar.startNotifications();
-    btChar.addEventListener('characteristicvaluechanged', onBTData);
+    // 嘗試 notification，手機可能不支援
+    try {
+      await btChar.startNotifications();
+      btChar.addEventListener('characteristicvaluechanged', onBTData);
+      log('Notification 模式啟動', 'info');
+    } catch(e) {
+      log('Notification 不支援，改用輪詢模式', 'info');
+    }
     btConnected = true;
     lastBTDataTime = Date.now();
-    pet.spentSteps = 0; // 重連後可用步數刷新為 micro:bit 目前步數
+    pet.spentSteps = 0;
+    startBTPolling(); // 同時啟動輪詢作為備援
     log('連線成功，開始接收步數', 'ok');
   } catch(e) {
     btConnected = false;
@@ -558,11 +565,45 @@ async function doConnect(device) {
   }
 }
 
+let btPollInterval = null;
+function startBTPolling() {
+  if (btPollInterval) clearInterval(btPollInterval);
+  btPollInterval = setInterval(async () => {
+    if (!btConnected || !btChar) return;
+    try {
+      const value = await btChar.readValue();
+      const text = new TextDecoder().decode(value).trim();
+      if (text.startsWith('STEPS:')) {
+        const n = parseInt(text.split(':')[1]);
+        if (!isNaN(n)) {
+          lastBTDataTime = Date.now();
+          if (n !== stepCount) {
+            stepCount = n;
+            document.getElementById('step-display').textContent = n;
+            document.getElementById('dist-display').textContent = Math.max(Math.round(calcDistance()), Math.round(n * 0.6));
+            document.getElementById('pet-avail-steps').textContent = availSteps();
+            log('步數更新：' + n + ' 步', 'ok');
+          }
+        }
+      }
+    } catch(e) {
+      // 讀取失敗通常代表真的斷線了
+      if (btConnected) {
+        btConnected = false;
+        lastBTDataTime = 0;
+        if (btPollInterval) { clearInterval(btPollInterval); btPollInterval = null; }
+        onDisconnected();
+      }
+    }
+  }, 1500);
+}
+
 function onDisconnected() {
   const p = document.getElementById('bt-pill');
   if (p.className !== 'status-pill bt-on') return;
   btConnected = false;
   lastBTDataTime = 0;
+  if (btPollInterval) { clearInterval(btPollInterval); btPollInterval = null; }
   p.className = 'status-pill';
   p.innerHTML = '<div class="dot"></div><span>已斷線，按此重新配對</span>';
   log('藍牙斷線！步數已保留，按「連線 micro:bit」重新配對', 'err');
