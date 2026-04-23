@@ -550,6 +550,7 @@ async function doConnect(device) {
     btChar.addEventListener('characteristicvaluechanged', onBTData);
     btConnected = true;
     lastBTDataTime = Date.now();
+    pet.spentSteps = 0; // 重連後可用步數刷新為 micro:bit 目前步數
     log('連線成功，開始接收步數', 'ok');
   } catch(e) {
     btConnected = false;
