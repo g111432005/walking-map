@@ -561,6 +561,16 @@ function onDisconnected() {
   log('藍牙斷線！按「連線 micro:bit」重連', 'err');
 }
 
+// 手機瀏覽器有時不觸發 gattserverdisconnected，改用輪詢偵測
+setInterval(() => {
+  if (btDevice && !btDevice.gatt.connected) {
+    const p = document.getElementById('bt-pill');
+    if (p.className === 'status-pill bt-on') {
+      onDisconnected();
+    }
+  }
+}, 2000);
+
 function onBTData(event) {
   const value = new TextDecoder().decode(event.target.value).trim();
   if (value.startsWith('STEPS:')) {
