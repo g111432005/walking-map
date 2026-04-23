@@ -550,28 +550,36 @@ async function doConnect(device) {
     await btChar.startNotifications();
     btChar.removeEventListener('characteristicvaluechanged', onBTData);
     btChar.addEventListener('characteristicvaluechanged', onBTData);
+    btConnected = true;
+    lastBTDataTime = Date.now();
     log('連線成功，開始接收步數', 'ok');
   } catch(e) { log('連線失敗：' + e.message, 'err'); }
 }
 
 function onDisconnected() {
   const p = document.getElementById('bt-pill');
+  if (p.className !== 'status-pill bt-on') return; // 避免重複觸發
   p.className = 'status-pill';
   p.innerHTML = '<div class="dot"></div><span>已斷線，按此重連</span>';
   log('藍牙斷線！按「連線 micro:bit」重連', 'err');
 }
 
-// 手機瀏覽器有時不觸發 gattserverdisconnected，改用輪詢偵測
+// 用「最後收到資料的時間」偵測斷線（手機最可靠的方式）
+// micro:bit 每秒發一次，超過 4 秒沒收到就視為斷線
+let lastBTDataTime = 0;
+let btConnected = false;
 setInterval(() => {
-  if (btDevice && !btDevice.gatt.connected) {
-    const p = document.getElementById('bt-pill');
-    if (p.className === 'status-pill bt-on') {
-      onDisconnected();
-    }
+  if (!btConnected) return;
+  const now = Date.now();
+  if (lastBTDataTime > 0 && now - lastBTDataTime > 4000) {
+    btConnected = false;
+    lastBTDataTime = 0;
+    onDisconnected();
   }
-}, 2000);
+}, 1000);
 
 function onBTData(event) {
+  lastBTDataTime = Date.now();
   const value = new TextDecoder().decode(event.target.value).trim();
   if (value.startsWith('STEPS:')) {
     const n = parseInt(value.split(':')[1]);
