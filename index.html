@@ -523,10 +523,21 @@ async function connectBluetooth() {
   if (!navigator.bluetooth) { log('請使用 Chrome 或 Edge 瀏覽器', 'err'); return; }
   try {
     log('搜尋 micro:bit...', 'info');
-    // 清除舊連線
+    // 清除舊連線：先把監聽器移除，避免舊事件污染新狀態
     if (btDevice) {
-      try { btDevice.gatt.disconnect(); } catch(e) {}
+      try { btDevice.removeEventListener('gattserverdisconnected', onDisconnected); } catch(e) {}
+      try {
+        if (btChar) {
+          btChar.removeEventListener('characteristicvaluechanged', onBTData);
+          try { await btChar.stopNotifications(); } catch(e) {}
+        }
+      } catch(e) {}
+      try { if (btDevice.gatt.connected) btDevice.gatt.disconnect(); } catch(e) {}
       btDevice = null; btChar = null;
+      btConnected = false;
+      lastBTDataTime = 0;
+      // 給系統一點時間處理舊連線的斷開
+      await new Promise(r => setTimeout(r, 300));
     }
     btDevice = await navigator.bluetooth.requestDevice({
       acceptAllDevices: true,
@@ -541,6 +552,11 @@ async function connectBluetooth() {
 async function doConnect(device) {
   try {
     const server = await device.gatt.connect();
+    // 確認這個 device 還是「當前」的 device（避免非同步競爭）
+    if (device !== btDevice) {
+      try { server.disconnect(); } catch(e) {}
+      return;
+    }
     const p = document.getElementById('bt-pill');
     p.className = 'status-pill bt-on';
     p.innerHTML = '<div class="dot"></div><span>' + device.name + '</span>';
@@ -551,6 +567,9 @@ async function doConnect(device) {
     btConnected = true;
     lastBTDataTime = Date.now();
     pet.spentSteps = 0; // 重連後可用步數刷新為 micro:bit 目前步數
+    stepCount = 0;      // 重連同時把舊的步數歸零，等 micro:bit 新資料刷入
+    document.getElementById('step-display').textContent = stepCount;
+    updatePetUI();       // ★ 強制刷新寵物與可用步數 UI
     log('連線成功，開始接收步數', 'ok');
   } catch(e) {
     btConnected = false;
@@ -558,14 +577,16 @@ async function doConnect(device) {
   }
 }
 
-function onDisconnected() {
-  const p = document.getElementById('bt-pill');
-  if (p.className !== 'status-pill bt-on') return;
+function onDisconnected(ev) {
+  // 忽略非當前 device 派送的事件（防止舊連線的遲到事件污染新連線）
+  if (ev && ev.target && btDevice && ev.target !== btDevice) return;
   btConnected = false;
   lastBTDataTime = 0;
+  const p = document.getElementById('bt-pill');
   p.className = 'status-pill';
   p.innerHTML = '<div class="dot"></div><span>已斷線，按此重新配對</span>';
   log('藍牙斷線！步數已保留，按「連線 micro:bit」重新配對', 'err');
+  updatePetUI();   // ★ 斷線後刷新寵物區 UI
 }
 
 // 用「最後收到資料的時間」偵測斷線（手機最可靠的方式）
@@ -578,12 +599,15 @@ setInterval(() => {
   if (lastBTDataTime > 0 && now - lastBTDataTime > 8000) {
     btConnected = false;
     lastBTDataTime = 0;
-    onDisconnected();
+    // 傳入帶當前 device 的偽事件，通過 onDisconnected 內的來源檢查
+    onDisconnected({ target: btDevice });
   }
 }, 1000);
 
 function onBTData(event) {
   lastBTDataTime = Date.now();
+  // 收到資料代表 GATT 活著，確保狀態旗標一致
+  if (!btConnected) btConnected = true;
   const value = new TextDecoder().decode(event.target.value).trim();
   if (value.startsWith('STEPS:')) {
     const n = parseInt(value.split(':')[1]);
@@ -591,7 +615,7 @@ function onBTData(event) {
       stepCount = n;
       document.getElementById('step-display').textContent = n;
       document.getElementById('dist-display').textContent = Math.max(Math.round(calcDistance()), Math.round(n * 0.6));
-      document.getElementById('pet-avail-steps').textContent = availSteps();
+      updatePetUI();   // ★ 刷新寵物 UI（包含可用步數）
       log('步數更新：' + n + ' 步', 'ok');
     }
   }
