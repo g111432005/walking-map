@@ -535,18 +535,15 @@ function setBtnDisconnected(label) {
 }
 
 // ===== 點擊切換：連線 / 斷開 =====
-let btBusy = false;  // 防止使用者狂點
+let btBusy = false;
 async function toggleBluetooth() {
   if (btBusy) { log('處理中，請稍候...', 'info'); return; }
   btBusy = true;
   try {
     if (btDevice && btDevice.gatt.connected) {
-      // 目前已連線 → 斷開
-      log('使用者主動斷開連線...', 'info');
+      log('使用者主動斷開連線（小朋友出發運動！）', 'info');
       try { btDevice.gatt.disconnect(); } catch(e) {}
-      // 斷開後 onDisconnected 會被觸發更新 UI；保留 btDevice 以便快速重連
     } else {
-      // 目前未連線 → 連線
       await connectBluetooth();
     }
   } finally {
@@ -578,19 +575,17 @@ async function gattConnectWithRetry(device, maxAttempts = 3) {
 async function connectBluetooth() {
   if (!navigator.bluetooth) { log('請使用 Chrome 或 Edge 瀏覽器', 'err'); return; }
   try {
-    // 快速路徑：如果還記得上次的 device，直接重連，不用再彈選擇器
+    // ★ 快速路徑：上次的 device 還在 → 重連同一台，保留 spentSteps
     if (btDevice && !btDevice.gatt.connected) {
       log('使用上次的裝置重新連線：' + btDevice.name, 'info');
       try { btDevice.removeEventListener('gattserverdisconnected', onDisconnected); } catch(e) {}
       btDevice.addEventListener('gattserverdisconnected', onDisconnected);
-      // 等久一點，讓上一個 GATT 階段完全收尾（手機需要更長時間）
       await new Promise(r => setTimeout(r, 1000));
-      await doConnect(btDevice);
+      await doConnect(btDevice, true);  // ★ true = 同一台，保留進度
       return;
     }
 
     log('搜尋 micro:bit...', 'info');
-    // 完全沒有 device 或要換裝置：清乾淨然後重新挑選
     if (btDevice) {
       try { btDevice.removeEventListener('gattserverdisconnected', onDisconnected); } catch(e) {}
       try {
@@ -611,11 +606,11 @@ async function connectBluetooth() {
     });
     btDevice.addEventListener('gattserverdisconnected', onDisconnected);
     log('找到：' + btDevice.name, 'ok');
-    await doConnect(btDevice);
+    await doConnect(btDevice, false);  // ★ false = 新裝置或重整後第一次連
   } catch(e) { log('藍牙失敗：' + e.message, 'err'); }
 }
 
-async function doConnect(device) {
+async function doConnect(device, isSameDevice) {
   try {
     const server = await gattConnectWithRetry(device, 3);
     if (device !== btDevice) {
@@ -631,16 +626,23 @@ async function doConnect(device) {
     btChar.addEventListener('characteristicvaluechanged', onBTData);
     btConnected = true;
     lastBTDataTime = Date.now();
-    pet.spentSteps = 0;
-    stepCount = 0;
+
+    if (!isSameDevice) {
+      // 換裝置 / 重整後首次連線：歸零
+      pet.spentSteps = 0;
+      stepCount = 0;
+      log('連線成功，開始接收步數', 'ok');
+    } else {
+      // ★ 同一台 micro:bit 重連：保留 spentSteps，等新總步數蓋過 stepCount
+      log('重連成功！保留先前的餵食記錄，等待 micro:bit 同步最新步數...', 'ok');
+    }
     document.getElementById('step-display').textContent = stepCount;
     updatePetUI();
-    setBtnConnected();   // ★ 切換按鈕為「斷開」狀態
-    log('連線成功，開始接收步數', 'ok');
+    setBtnConnected();
   } catch(e) {
     btConnected = false;
-    setBtnDisconnected('重新連線 micro:bit');  // ★ 失敗時提示可再點
-    log('連線失敗：' + e.message + '（再點一次按鈕重試）', 'err');
+    setBtnDisconnected('重新連線 micro:bit');
+    log('連線失敗：' + e.message + '（再點一次按鈕重試，或確認 micro:bit 在範圍內）', 'err');
   }
 }
 
@@ -651,8 +653,8 @@ function onDisconnected(ev) {
   const p = document.getElementById('bt-pill');
   p.className = 'status-pill';
   p.innerHTML = '<div class="dot"></div><span>已斷線，按此重新配對</span>';
-  setBtnDisconnected('重新連線 micro:bit');  // ★ 切換按鈕為「重新連線」狀態
-  log('藍牙斷線！步數已保留，按按鈕重新連線', 'err');
+  setBtnDisconnected('重新連線 micro:bit');
+  log('藍牙斷線！步數會繼續在 micro:bit 上累積，回來範圍內按按鈕重連即可', 'err');
   updatePetUI();
 }
 
