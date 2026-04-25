@@ -522,6 +522,18 @@ function stopWalk() {
 async function connectBluetooth() {
   if (!navigator.bluetooth) { log('請使用 Chrome 或 Edge 瀏覽器', 'err'); return; }
   try {
+    // 若已有 device 但 GATT 未連線（例如剛斷線），直接用既有 device 重連，不用再彈選單
+    if (btDevice && !btDevice.gatt.connected) {
+      log('使用上次的裝置重新連線：' + btDevice.name, 'info');
+      // 確保監聽器是乾淨的
+      try { btDevice.removeEventListener('gattserverdisconnected', onDisconnected); } catch(e) {}
+      btDevice.addEventListener('gattserverdisconnected', onDisconnected);
+      // 等久一點，讓上一個 GATT 階段完全收尾（手機需要更長時間）
+      await new Promise(r => setTimeout(r, 1000));
+      await doConnect(btDevice);
+      return;
+    }
+
     log('搜尋 micro:bit...', 'info');
     // 清除舊連線：先把監聽器移除，避免舊事件污染新狀態
     if (btDevice) {
@@ -536,8 +548,8 @@ async function connectBluetooth() {
       btDevice = null; btChar = null;
       btConnected = false;
       lastBTDataTime = 0;
-      // 給系統一點時間處理舊連線的斷開
-      await new Promise(r => setTimeout(r, 300));
+      // 給系統足夠時間處理舊連線的斷開（手機端 800~1500ms 較穩定）
+      await new Promise(r => setTimeout(r, 1000));
     }
     btDevice = await navigator.bluetooth.requestDevice({
       acceptAllDevices: true,
@@ -549,9 +561,32 @@ async function connectBluetooth() {
   } catch(e) { log('藍牙失敗：' + e.message, 'err'); }
 }
 
+// 帶重試的 GATT 連線（手機 Chrome 重連時第一次常常失敗，重試一兩次就好）
+async function gattConnectWithRetry(device, maxAttempts = 3) {
+  let lastErr;
+  for (let i = 1; i <= maxAttempts; i++) {
+    try {
+      // 每次嘗試前確認 device 沒在另一條路徑連上
+      if (device.gatt.connected) {
+        try { device.gatt.disconnect(); } catch(e) {}
+        await new Promise(r => setTimeout(r, 500));
+      }
+      return await device.gatt.connect();
+    } catch (e) {
+      lastErr = e;
+      if (i < maxAttempts) {
+        log('第 ' + i + ' 次連線失敗，' + (i * 800) + 'ms 後重試...', 'info');
+        // 指數退避：800ms, 1600ms
+        await new Promise(r => setTimeout(r, i * 800));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function doConnect(device) {
   try {
-    const server = await device.gatt.connect();
+    const server = await gattConnectWithRetry(device, 3);
     // 確認這個 device 還是「當前」的 device（避免非同步競爭）
     if (device !== btDevice) {
       try { server.disconnect(); } catch(e) {}
@@ -573,7 +608,8 @@ async function doConnect(device) {
     log('連線成功，開始接收步數', 'ok');
   } catch(e) {
     btConnected = false;
-    log('連線失敗：' + e.message, 'err');
+    log('連線失敗：' + e.message + '（請再按一次「連線 micro:bit」重試）', 'err');
+    // 不把 btDevice 設成 null —— 這樣使用者再按一次按鈕，會走「使用上次的裝置」分支，不用再彈選單
   }
 }
 
