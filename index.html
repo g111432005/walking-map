@@ -370,6 +370,9 @@ let coords = [];
 let gpsWatcher = null;
 let isWalking = false;
 let stepCount = 0;
+// ★ 新增：走路結束時的快照（凍結用）。null = 走路中，數字 = 已結束的快照值
+let walkStepsSnapshot = null;
+let walkDistanceSnapshot = null;
 let startTime = null;
 let btDevice = null, btChar = null;
 let simInterval = null;
@@ -415,6 +418,12 @@ function log(msg, type='info') {
 
 function startWalk() {
   coords = []; isWalking = true; startTime = Date.now();
+  // ★ 開始新的走路 → 清除舊快照、步數歸零（這次走路從 0 算）
+  walkStepsSnapshot = null;
+  walkDistanceSnapshot = null;
+  stepCount = 0;
+  document.getElementById('step-display').textContent = 0;
+  document.getElementById('dist-display').textContent = 0;
   polyline.setLatLngs([]);
   if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
   if (endMarker)   { map.removeLayer(endMarker);   endMarker = null; }
@@ -499,6 +508,11 @@ function stopSimulate() {
 
 function stopWalk() {
   isWalking = false;
+  // ★ 拍下「這次走路」的最終值，之後 UI 顯示會凍結在這
+  walkStepsSnapshot = stepCount;
+  walkDistanceSnapshot = Math.max(Math.round(calcDistance()), Math.round(stepCount * 0.6));
+  document.getElementById('step-display').textContent = walkStepsSnapshot;
+  document.getElementById('dist-display').textContent = walkDistanceSnapshot;
   stopSimulate();
   if (gpsWatcher !== null) { navigator.geolocation.clearWatch(gpsWatcher); gpsWatcher = null; }
   document.getElementById('btn-stop').disabled = true;
@@ -681,11 +695,17 @@ function onBTData(event) {
   if (value.startsWith('STEPS:')) {
     const n = parseInt(value.split(':')[1]);
     if (!isNaN(n)) {
-      stepCount = n;
-      document.getElementById('step-display').textContent = n;
-      document.getElementById('dist-display').textContent = Math.max(Math.round(calcDistance()), Math.round(n * 0.6));
-      updatePetUI();   // ★ 刷新寵物 UI（包含可用步數）
-      log('步數更新：' + n + ' 步', 'ok');
+      stepCount = n;  // ★ 永遠更新內部步數（寵物可用步數會跟著更新）
+      if (walkStepsSnapshot === null) {
+        // 走路中 → 即時顯示
+        document.getElementById('step-display').textContent = n;
+        document.getElementById('dist-display').textContent = Math.max(Math.round(calcDistance()), Math.round(n * 0.6));
+        log('步數更新：' + n + ' 步', 'ok');
+      } else {
+        // ★ 走路已結束 → 顯示凍結，但寵物資料持續更新
+        log('步數同步：' + n + ' 步（走路已結束，僅供餵食寵物）', 'info');
+      }
+      updatePetUI();   // 刷新寵物 UI（可用步數會跟著動）
     }
   }
 }
@@ -1365,9 +1385,13 @@ function haversine([la1,lo1],[la2,lo2]) {
 }
 
 function showModal() {
-  const dist = Math.max(Math.round(calcDistance()), Math.round(stepCount * 0.6));
+  // ★ 走路結束後用快照值，避免後續 micro:bit 繼續傳資料污染 modal
+  const stepsForModal = walkStepsSnapshot !== null ? walkStepsSnapshot : stepCount;
+  const dist = walkDistanceSnapshot !== null
+    ? walkDistanceSnapshot
+    : Math.max(Math.round(calcDistance()), Math.round(stepCount * 0.6));
   const mins = startTime ? Math.round((Date.now()-startTime)/60000) : 0;
-  document.getElementById('m-steps').textContent = stepCount;
+  document.getElementById('m-steps').textContent = stepsForModal;
   document.getElementById('m-dist').textContent  = dist;
   document.getElementById('m-pts').textContent   = coords.length;
   document.getElementById('m-time').textContent  = mins;
@@ -1378,6 +1402,8 @@ function closeModal() { document.getElementById('modal').classList.remove('show'
 
 function resetAll() {
   coords = []; stepCount = 0; startTime = null; isWalking = false;
+  walkStepsSnapshot = null;     // ★ 清除快照
+  walkDistanceSnapshot = null;
   stopSimulate();
   if (gpsWatcher !== null) { navigator.geolocation.clearWatch(gpsWatcher); gpsWatcher = null; }
   if (btDevice && btDevice.gatt.connected) btDevice.gatt.disconnect();
