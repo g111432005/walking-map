@@ -92,6 +92,7 @@
   .btn-start { background: linear-gradient(135deg,#2ecc71,#27ae60); color:#fff; box-shadow:0 4px 12px rgba(46,204,113,.35); }
   .btn-stop  { background: linear-gradient(135deg,#e74c3c,#c0392b); color:#fff; box-shadow:0 4px 12px rgba(231,76,60,.35); }
   .btn-bt    { background: linear-gradient(135deg,#3498db,#2980b9); color:#fff; box-shadow:0 4px 12px rgba(52,152,219,.35); }
+  .btn-bt-off{ background: linear-gradient(135deg,#95a5a6,#7f8c8d); color:#fff; box-shadow:0 4px 12px rgba(127,140,141,.35); }
   .btn-sim   { background: linear-gradient(135deg,#f39c12,#d68910); color:#fff; box-shadow:0 4px 12px rgba(243,156,18,.35); }
   .btn-reset { background: var(--card); color: var(--text-muted); border: 1.5px solid #dde1e7; }
 
@@ -282,7 +283,7 @@
   <button class="btn btn-start" id="btn-start" onclick="startWalk()">開始走路</button>
   <button class="btn btn-stop"  id="btn-stop"  onclick="stopWalk()" disabled>結束走路</button>
   <div class="btn-row">
-    <button class="btn btn-bt"  id="btn-bt"  onclick="connectBluetooth()">連線 micro:bit</button>
+    <button class="btn btn-bt"  id="btn-bt"  onclick="toggleBluetooth()">連線 micro:bit</button>
     <button class="btn btn-sim" id="btn-sim" onclick="simulateStep()" disabled>模擬走路</button>
   </div>
   <button class="btn btn-reset" id="btn-reset" onclick="resetAll()" disabled>重新開始</button>
@@ -519,13 +520,67 @@ function stopWalk() {
   showModal();
 }
 
+// ===== 按鈕外觀切換 =====
+function setBtnConnected() {
+  const b = document.getElementById('btn-bt');
+  b.textContent = '斷開 micro:bit';
+  b.classList.remove('btn-bt');
+  b.classList.add('btn-bt-off');
+}
+function setBtnDisconnected(label) {
+  const b = document.getElementById('btn-bt');
+  b.textContent = label || '連線 micro:bit';
+  b.classList.remove('btn-bt-off');
+  b.classList.add('btn-bt');
+}
+
+// ===== 點擊切換：連線 / 斷開 =====
+let btBusy = false;  // 防止使用者狂點
+async function toggleBluetooth() {
+  if (btBusy) { log('處理中，請稍候...', 'info'); return; }
+  btBusy = true;
+  try {
+    if (btDevice && btDevice.gatt.connected) {
+      // 目前已連線 → 斷開
+      log('使用者主動斷開連線...', 'info');
+      try { btDevice.gatt.disconnect(); } catch(e) {}
+      // 斷開後 onDisconnected 會被觸發更新 UI；保留 btDevice 以便快速重連
+    } else {
+      // 目前未連線 → 連線
+      await connectBluetooth();
+    }
+  } finally {
+    btBusy = false;
+  }
+}
+
+// 帶重試的 GATT 連線（手機 Chrome 第一次重連常常失敗，重試一兩次就好）
+async function gattConnectWithRetry(device, maxAttempts = 3) {
+  let lastErr;
+  for (let i = 1; i <= maxAttempts; i++) {
+    try {
+      if (device.gatt.connected) {
+        try { device.gatt.disconnect(); } catch(e) {}
+        await new Promise(r => setTimeout(r, 500));
+      }
+      return await device.gatt.connect();
+    } catch (e) {
+      lastErr = e;
+      if (i < maxAttempts) {
+        log('第 ' + i + ' 次連線失敗，' + (i * 800) + 'ms 後重試...', 'info');
+        await new Promise(r => setTimeout(r, i * 800));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function connectBluetooth() {
   if (!navigator.bluetooth) { log('請使用 Chrome 或 Edge 瀏覽器', 'err'); return; }
   try {
-    // 若已有 device 但 GATT 未連線（例如剛斷線），直接用既有 device 重連，不用再彈選單
+    // 快速路徑：如果還記得上次的 device，直接重連，不用再彈選擇器
     if (btDevice && !btDevice.gatt.connected) {
       log('使用上次的裝置重新連線：' + btDevice.name, 'info');
-      // 確保監聽器是乾淨的
       try { btDevice.removeEventListener('gattserverdisconnected', onDisconnected); } catch(e) {}
       btDevice.addEventListener('gattserverdisconnected', onDisconnected);
       // 等久一點，讓上一個 GATT 階段完全收尾（手機需要更長時間）
@@ -535,7 +590,7 @@ async function connectBluetooth() {
     }
 
     log('搜尋 micro:bit...', 'info');
-    // 清除舊連線：先把監聽器移除，避免舊事件污染新狀態
+    // 完全沒有 device 或要換裝置：清乾淨然後重新挑選
     if (btDevice) {
       try { btDevice.removeEventListener('gattserverdisconnected', onDisconnected); } catch(e) {}
       try {
@@ -548,7 +603,6 @@ async function connectBluetooth() {
       btDevice = null; btChar = null;
       btConnected = false;
       lastBTDataTime = 0;
-      // 給系統足夠時間處理舊連線的斷開（手機端 800~1500ms 較穩定）
       await new Promise(r => setTimeout(r, 1000));
     }
     btDevice = await navigator.bluetooth.requestDevice({
@@ -561,33 +615,9 @@ async function connectBluetooth() {
   } catch(e) { log('藍牙失敗：' + e.message, 'err'); }
 }
 
-// 帶重試的 GATT 連線（手機 Chrome 重連時第一次常常失敗，重試一兩次就好）
-async function gattConnectWithRetry(device, maxAttempts = 3) {
-  let lastErr;
-  for (let i = 1; i <= maxAttempts; i++) {
-    try {
-      // 每次嘗試前確認 device 沒在另一條路徑連上
-      if (device.gatt.connected) {
-        try { device.gatt.disconnect(); } catch(e) {}
-        await new Promise(r => setTimeout(r, 500));
-      }
-      return await device.gatt.connect();
-    } catch (e) {
-      lastErr = e;
-      if (i < maxAttempts) {
-        log('第 ' + i + ' 次連線失敗，' + (i * 800) + 'ms 後重試...', 'info');
-        // 指數退避：800ms, 1600ms
-        await new Promise(r => setTimeout(r, i * 800));
-      }
-    }
-  }
-  throw lastErr;
-}
-
 async function doConnect(device) {
   try {
     const server = await gattConnectWithRetry(device, 3);
-    // 確認這個 device 還是「當前」的 device（避免非同步競爭）
     if (device !== btDevice) {
       try { server.disconnect(); } catch(e) {}
       return;
@@ -601,28 +631,29 @@ async function doConnect(device) {
     btChar.addEventListener('characteristicvaluechanged', onBTData);
     btConnected = true;
     lastBTDataTime = Date.now();
-    pet.spentSteps = 0; // 重連後可用步數刷新為 micro:bit 目前步數
-    stepCount = 0;      // 重連同時把舊的步數歸零，等 micro:bit 新資料刷入
+    pet.spentSteps = 0;
+    stepCount = 0;
     document.getElementById('step-display').textContent = stepCount;
-    updatePetUI();       // ★ 強制刷新寵物與可用步數 UI
+    updatePetUI();
+    setBtnConnected();   // ★ 切換按鈕為「斷開」狀態
     log('連線成功，開始接收步數', 'ok');
   } catch(e) {
     btConnected = false;
-    log('連線失敗：' + e.message + '（請再按一次「連線 micro:bit」重試）', 'err');
-    // 不把 btDevice 設成 null —— 這樣使用者再按一次按鈕，會走「使用上次的裝置」分支，不用再彈選單
+    setBtnDisconnected('重新連線 micro:bit');  // ★ 失敗時提示可再點
+    log('連線失敗：' + e.message + '（再點一次按鈕重試）', 'err');
   }
 }
 
 function onDisconnected(ev) {
-  // 忽略非當前 device 派送的事件（防止舊連線的遲到事件污染新連線）
   if (ev && ev.target && btDevice && ev.target !== btDevice) return;
   btConnected = false;
   lastBTDataTime = 0;
   const p = document.getElementById('bt-pill');
   p.className = 'status-pill';
   p.innerHTML = '<div class="dot"></div><span>已斷線，按此重新配對</span>';
-  log('藍牙斷線！步數已保留，按「連線 micro:bit」重新配對', 'err');
-  updatePetUI();   // ★ 斷線後刷新寵物區 UI
+  setBtnDisconnected('重新連線 micro:bit');  // ★ 切換按鈕為「重新連線」狀態
+  log('藍牙斷線！步數已保留，按按鈕重新連線', 'err');
+  updatePetUI();
 }
 
 // 用「最後收到資料的時間」偵測斷線（手機最可靠的方式）
