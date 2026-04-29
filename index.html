@@ -615,8 +615,9 @@ async function connectBluetooth() {
       await new Promise(r => setTimeout(r, 1000));
     }
     btDevice = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e']
+      // ★ 用 filters 而非 acceptAllDevices，相容 Bluefy（iPhone）和 Chrome（Android）
+      // 只顯示有廣播 micro:bit UART service 的裝置，避免選錯
+      filters: [{ services: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e'] }]
     });
     btDevice.addEventListener('gattserverdisconnected', onDisconnected);
     log('找到：' + btDevice.name, 'ok');
